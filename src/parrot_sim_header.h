@@ -9,6 +9,7 @@
 #define SRC_PARROT_SIM_HEADER_H_
 
 #include "ros/ros.h"
+#include <string>
 //includy do symulacji
 #include "geometry_msgs/Twist.h"
 #include "nav_msgs/Odometry.h"
@@ -34,5 +35,6 @@ void drawGrid(cv_bridge::CvImagePtr &cv_ptr, cv::Mat &imgThresholded);
 std::vector<cv::Vec3f> circleFinding(cv_bridge::CvImagePtr &cv_ptr, cv::Mat &imgThresholded);
 cv::Vec3f findBiggestCircle(std::vector<cv::Vec3f>  circles);
 void findControl(cv_bridge::CvImagePtr &cv_ptr, cv::Vec3f biggest);
+geometry_msgs::Twist setVelocity(bool objectFound);
 
 #endif /* SRC_PARROT_SIM_HEADER_H_ */

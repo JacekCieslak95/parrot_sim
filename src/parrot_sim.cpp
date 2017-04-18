@@ -1,7 +1,7 @@
 #include "parrot_sim_header.h"
 
 
-std::string green_text = "green ball";
+
 int fontFace = cv::FONT_HERSHEY_DUPLEX;
 //początkowe wartości do filtra. Po dobraniu można to wywalić i w ich miejsce wsadziś stałe
 int iLowH = 68;				//dobrze działa na 68
@@ -15,28 +15,40 @@ int iHighV = 190;			//dobrze działa na 190
 
 int circle_filter=100;		//dobrze działa na 100
 int height,width;			//zmienne do przechowywania wymiarów obrazu
+int vert_control, hor_control,dist_control; //zmienne globalne, do komunikacji obraz - symulator
+
+bool found=false;
 
 image_transport::Subscriber image_sub_; //do subskrypcji obrazu
 image_transport::Publisher image_pub_;	//do publikacji przerobionego obrazu
+ros::Publisher control_pub;
 
 
 int main(int argc, char** argv)
 {
 	std::cout<<"Image_receiver started!"<<std::endl;
+	vert_control = hor_control = dist_control=0; //przypisanie sterowania
 	ros::init(argc, argv, "image_converter");
-
 	ros::NodeHandle nh;
-	ros::Subscriber image_sub_;
+
 	ros::Publisher image_pub_;
-	image_sub_ = nh.subscribe("/camera/image", 10,	imageCb);
+	ros::Publisher control_pub;
+	geometry_msgs::Twist vel_msg;
 	image_pub_ = nh.advertise<sensor_msgs::Image>("/image_converter/output_video", 1);
+	control_pub = nh.advertise<geometry_msgs::Twist>("/cmd_vel", 10);
+	std::cout << "start" <<std::endl;
+	ros::Subscriber image_sub_;
+	image_sub_ = nh.subscribe("/camera/image", 1,	imageCb);
 
 	//tworzenie okna i suwaków do kontroli
 	createTrackbars();
 	cv::namedWindow("Window with detection");
-
-	ros::spin();
-
+	while(nh.ok())
+	{
+		vel_msg=setVelocity(found);
+		control_pub.publish(vel_msg);
+		ros::spinOnce();
+	};
 
 	cv::destroyWindow("Window with detection");
 	std::cout<<std::endl<<"Image_receiver closed!"<<std::endl;
@@ -68,13 +80,15 @@ void imageCb(const sensor_msgs::ImageConstPtr& msg)
 		drawGrid(cv_ptr, imgThresholded);
 		if(!circles.empty())
 		{
+			found=true;
 			cv::Vec3f biggest_circle = findBiggestCircle(circles);
 			findControl(cv_ptr,biggest_circle);
 		}
 		else
 		{
-			cv::Point info_text_base(0, height-30);
-			cv::putText(cv_ptr->image, "no circles found!", info_text_base, fontFace, 1, CV_RGB(200,0,0), 2, 8);
+			found=false;
+			cv::Point info_text_base(0, height-40);
+			cv::putText(cv_ptr->image, "no object found!", info_text_base, fontFace, 1, CV_RGB(200,0,0), 1, 8);
 
 		}
 		cv::imshow("Green detection", imgThresholded); 			//Pokaż przefiltrowany obraz
@@ -135,7 +149,7 @@ void drawGrid(cv_bridge::CvImagePtr &cv_ptr, cv::Mat &imgThresholded)
 	cv::line(imgThresholded, top, bottom, cv::Scalar(160, 160, 160), 0.5);
 }
 std::vector<cv::Vec3f> circleFinding(cv_bridge::CvImagePtr &cv_ptr, cv::Mat &imgThresholded)
-{
+				{
 	std::vector<cv::Vec3f> circles;												// wektor przechowujący parametry kółek
 	cv::HoughCircles(imgThresholded, circles, CV_HOUGH_GRADIENT,
 			2, imgThresholded.rows  /4, 200, circle_filter );					// Wykrywanie kółek
@@ -144,14 +158,13 @@ std::vector<cv::Vec3f> circleFinding(cv_bridge::CvImagePtr &cv_ptr, cv::Mat &img
 		cv::Point center(cvRound(circles[i][0]), cvRound(circles[i][1]));
 		int radius = cvRound(circles[i][2]);
 		cv::Point text_base(cvRound(circles[i][0]) + radius, cvRound(circles[i][1]) +radius) ;
-		cv::putText(cv_ptr->image, green_text, text_base, fontFace, 1, CV_RGB(0,200,0), 2, 8);
 		// draw the circle center
 		cv::circle( cv_ptr->image, center, 3, cv::Scalar(0,255,0), -1, 8, 0 );
 		// draw the circle outline
 		cv::circle( cv_ptr->image, center, radius, cv::Scalar(0,0,255), 3, 8, 0 );
 	}
 	return circles;
-}
+				}
 cv::Vec3f findBiggestCircle(std::vector<cv::Vec3f> circles)
 {
 	cv::Vec3f biggest;
@@ -168,38 +181,133 @@ cv::Vec3f findBiggestCircle(std::vector<cv::Vec3f> circles)
 }
 void findControl(cv_bridge::CvImagePtr &cv_ptr, cv::Vec3f biggest)
 {
-	cv::Point vert_text_base(0, height-40);
 	cv::Point hor_text_base(0, height-10);
-	cv::Point info_text_base(0, height-30);
+	cv::Point vert_text_base(0, height-40);
+	cv::Point dist_text_base(0, height-70);
 	bool vert_ok = false;
 	bool hor_ok = false;
+	bool dist_ok=false;
 	if (biggest[0]< (width/2-biggest[2]))
 	{
-		cv::putText(cv_ptr->image, "go right!", vert_text_base, fontFace, 1, CV_RGB(204,204,0), 2, 8);
+		cv::putText(cv_ptr->image, "go right!", hor_text_base, fontFace, 1, CV_RGB(204,204,0), 1, 8);
+		hor_control=1;
 	}
 	else if (biggest[0]> (width/2+biggest[2]))
 	{
-		cv::putText(cv_ptr->image, "go left!", vert_text_base, fontFace, 1, CV_RGB(204,204,0), 2, 8);
+		cv::putText(cv_ptr->image, "go left!", hor_text_base, fontFace, 1, CV_RGB(204,204,0), 1, 8);
+		hor_control=-1;
 	}
 	else
 	{
-		vert_ok=true;
+		cv::putText(cv_ptr->image, "Horizonal - OK", hor_text_base, fontFace, 1, CV_RGB(0,204,0), 1, 8);
+		hor_ok=true;
+		hor_control=0;
 	}
 
 	if (biggest[1]< (height/2-biggest[2]))
 	{
-		cv::putText(cv_ptr->image, "go down!", hor_text_base, fontFace, 1, CV_RGB(204,204,0), 2, 8);
+		cv::putText(cv_ptr->image, "go up!", vert_text_base, fontFace, 1, CV_RGB(204,204,0), 1, 8);
+		vert_control=-1;
 	}
 	else if (biggest[1]> (height/2+biggest[2]))
 	{
-		cv::putText(cv_ptr->image, "go up!", hor_text_base, fontFace, 1, CV_RGB(204,204,0), 2, 8);
+		cv::putText(cv_ptr->image, "go down!", vert_text_base, fontFace, 1, CV_RGB(204,204,0), 1, 8);
+		vert_control=1;
 	}
 	else
 	{
-		hor_ok=true;
+		cv::putText(cv_ptr->image, "Vertical - OK", vert_text_base, fontFace, 1, CV_RGB(0,204,0), 1, 8);
+		vert_ok=true;
+		vert_control=0;
 	}
-	if(vert_ok && hor_ok)
+//	std::string radius;
+//	int Number = cvRound(biggest[2]);
+//	std::string Result;
+//	std::stringstream convert;
+//	convert <<"Radius =" <<Number;//add the value of Number to the characters in the stream
+//	radius = convert.str();//set Result to the content of the stream
+//	sprintf (buff, "Radius=%d", cvRound(biggest[2]));
+//	cv::putText(cv_ptr->image, radius, dist_text_base, fontFace, 1, CV_RGB(0,204,0), 2, 8);
+
+
+	if (cvRound(biggest[2])<50)
 	{
-		cv::putText(cv_ptr->image, "OK!", info_text_base, fontFace, 1, CV_RGB(0,200,0), 2, 8);
+		cv::putText(cv_ptr->image, "too far!", dist_text_base, fontFace, 1, CV_RGB(204,204,0), 1, 8);
+		dist_control=1;
 	}
+	else if (cvRound(biggest[2])>70)
+	{
+		cv::putText(cv_ptr->image, "too close!", dist_text_base, fontFace, 1, CV_RGB(204,204,0), 1, 8);
+		dist_control=-1;
+	}
+	else
+	{
+		cv::putText(cv_ptr->image, "Distance - OK", dist_text_base, fontFace, 1, CV_RGB(0,204,0), 1, 8);
+		dist_ok=true;
+		dist_control=0;
+	}
+
+}
+geometry_msgs::Twist setVelocity(bool objectFound)
+{
+	geometry_msgs::Twist set_vel;
+	if(objectFound)
+	{
+		set_vel.linear.x=0;
+		set_vel.linear.y=0;
+		set_vel.linear.z=0;
+		set_vel.angular.x=0;
+		set_vel.angular.y=0;
+		set_vel.angular.z=0;
+
+		//kontrola obrotu
+		if(hor_control==1)
+		{
+			set_vel.angular.z=-1;
+		}
+		else if(hor_control==-1)
+		{
+			set_vel.angular.z=1;
+		}
+		else if(hor_control==0)
+		{
+			set_vel.angular.z=0;
+		}
+		//kontrola wysokości
+		if(vert_control==1)
+		{
+			set_vel.linear.z=-0.7;
+		}
+		else if(vert_control==-1)
+		{
+			set_vel.linear.z=0.7;
+		}
+		else if(vert_control==0)
+		{
+			set_vel.linear.z=0;
+		}
+		//kontrola odległości
+		if(dist_control==1)
+		{
+			set_vel.linear.x=0.7;
+		}
+		else if(dist_control==-1)
+		{
+			set_vel.linear.x=-0.7;
+		}
+		else if(dist_control==0)
+		{
+			set_vel.linear.x=0;
+		}
+	}
+	else
+	{
+		set_vel.linear.x=0;
+		set_vel.linear.y=0;
+		set_vel.linear.z=0;
+		set_vel.angular.x=0;
+		set_vel.angular.y=0;
+		set_vel.angular.z=0;
+	}
+	return set_vel;
 }
