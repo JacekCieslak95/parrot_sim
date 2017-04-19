@@ -13,9 +13,16 @@ int iHighS = 255;			//dobrze działa na 255
 int iLowV = 28;				//dobrze działa na 28
 int iHighV = 190;			//dobrze działa na 190
 
-int circle_filter=100;		//dobrze działa na 100
+int circle_filter=70;		//dobrze działa na 100
 int height,width;			//zmienne do przechowywania wymiarów obrazu
-int vert_control, hor_control,dist_control; //zmienne globalne, do komunikacji obraz - symulator
+int dist_control; //zmienne globalne, do komunikacji obraz - symulator
+//( double new_Kp, double new_Kd, double new_dt, double new_max, double new_min, double new_preset)
+
+PD PD_vert(0.01, 0.01, 1, 1, -1, 240);
+PD PD_hor(0.01, 0.01, 1, 1, -1, 320);
+PD PD_dist(0.05, 0.05, 1, 1, -1, 60);
+
+double vel_lin_x, vel_lin_z, vel_ang_z;
 
 bool found=false;
 
@@ -26,11 +33,10 @@ ros::Publisher control_pub;
 
 int main(int argc, char** argv)
 {
-	std::cout<<"Image_receiver started!"<<std::endl;
-	vert_control = hor_control = dist_control=0; //przypisanie sterowania
+	std::cout<<"Parrot_sim started!"<<std::endl;
+	dist_control=0; //przypisanie sterowania
 	ros::init(argc, argv, "image_converter");
 	ros::NodeHandle nh;
-
 	ros::Publisher image_pub_;
 	ros::Publisher control_pub;
 	geometry_msgs::Twist vel_msg;
@@ -51,7 +57,7 @@ int main(int argc, char** argv)
 	};
 
 	cv::destroyWindow("Window with detection");
-	std::cout<<std::endl<<"Image_receiver closed!"<<std::endl;
+	std::cout<<std::endl<<"Parrot_sim closed!"<<std::endl;
 	return 0;
 }
 
@@ -91,7 +97,7 @@ void imageCb(const sensor_msgs::ImageConstPtr& msg)
 			cv::putText(cv_ptr->image, "no object found!", info_text_base, fontFace, 1, CV_RGB(200,0,0), 1, 8);
 
 		}
-		cv::imshow("Green detection", imgThresholded); 			//Pokaż przefiltrowany obraz
+		//cv::imshow("Green detection", imgThresholded); 			//Pokaż przefiltrowany obraz
 		cv::imshow("Window with detection", cv_ptr->image);		//Pokaż obraz z nałożonymi kołami
 		cv::waitKey(3);
 		// opublikowanie przerobionego obrazu
@@ -184,67 +190,54 @@ void findControl(cv_bridge::CvImagePtr &cv_ptr, cv::Vec3f biggest)
 	cv::Point hor_text_base(0, height-10);
 	cv::Point vert_text_base(0, height-40);
 	cv::Point dist_text_base(0, height-70);
-	bool vert_ok = false;
-	bool hor_ok = false;
-	bool dist_ok=false;
-	if (biggest[0]< (width/2-biggest[2]))
+	if (biggest[0]< (width/2-(biggest[2]/3)))
 	{
 		cv::putText(cv_ptr->image, "go right!", hor_text_base, fontFace, 1, CV_RGB(204,204,0), 1, 8);
-		hor_control=1;
+		vel_ang_z=PD_hor.getCurrentControl(biggest[0]);
 	}
-	else if (biggest[0]> (width/2+biggest[2]))
+	else if (biggest[0]> (width/2+(biggest[2]/3)))
 	{
 		cv::putText(cv_ptr->image, "go left!", hor_text_base, fontFace, 1, CV_RGB(204,204,0), 1, 8);
-		hor_control=-1;
+		vel_ang_z=PD_hor.getCurrentControl(biggest[0]);
 	}
 	else
 	{
 		cv::putText(cv_ptr->image, "Horizonal - OK", hor_text_base, fontFace, 1, CV_RGB(0,204,0), 1, 8);
-		hor_ok=true;
-		hor_control=0;
+		vel_ang_z=0;//PD_hor.getCurrentControl(biggest[0]);
 	}
 
-	if (biggest[1]< (height/2-biggest[2]))
+	if (biggest[1]< (height/2-(biggest[2]/3)))
 	{
 		cv::putText(cv_ptr->image, "go up!", vert_text_base, fontFace, 1, CV_RGB(204,204,0), 1, 8);
-		vert_control=-1;
+		vel_lin_z=PD_vert.getCurrentControl(biggest[1]);
+
 	}
-	else if (biggest[1]> (height/2+biggest[2]))
+	else if (biggest[1]> (height/2+(biggest[2]/3)))
 	{
 		cv::putText(cv_ptr->image, "go down!", vert_text_base, fontFace, 1, CV_RGB(204,204,0), 1, 8);
-		vert_control=1;
+		vel_lin_z=PD_vert.getCurrentControl(biggest[1]);
 	}
 	else
 	{
 		cv::putText(cv_ptr->image, "Vertical - OK", vert_text_base, fontFace, 1, CV_RGB(0,204,0), 1, 8);
-		vert_ok=true;
-		vert_control=0;
+		vel_lin_z=0;//PD_vert.getCurrentControl(biggest[1]);
 	}
-//	std::string radius;
-//	int Number = cvRound(biggest[2]);
-//	std::string Result;
-//	std::stringstream convert;
-//	convert <<"Radius =" <<Number;//add the value of Number to the characters in the stream
-//	radius = convert.str();//set Result to the content of the stream
-//	sprintf (buff, "Radius=%d", cvRound(biggest[2]));
-//	cv::putText(cv_ptr->image, radius, dist_text_base, fontFace, 1, CV_RGB(0,204,0), 2, 8);
-
 
 	if (cvRound(biggest[2])<50)
 	{
 		cv::putText(cv_ptr->image, "too far!", dist_text_base, fontFace, 1, CV_RGB(204,204,0), 1, 8);
-		dist_control=1;
+		vel_lin_x=PD_dist.getCurrentControl(biggest[2]);
+
 	}
 	else if (cvRound(biggest[2])>70)
 	{
 		cv::putText(cv_ptr->image, "too close!", dist_text_base, fontFace, 1, CV_RGB(204,204,0), 1, 8);
-		dist_control=-1;
+		vel_lin_x=PD_dist.getCurrentControl(biggest[2]);
 	}
 	else
 	{
 		cv::putText(cv_ptr->image, "Distance - OK", dist_text_base, fontFace, 1, CV_RGB(0,204,0), 1, 8);
-		dist_ok=true;
-		dist_control=0;
+		vel_lin_x=0;//PD_dist.getCurrentControl(biggest[2]);
 	}
 
 }
@@ -261,44 +254,11 @@ geometry_msgs::Twist setVelocity(bool objectFound)
 		set_vel.angular.z=0;
 
 		//kontrola obrotu
-		if(hor_control==1)
-		{
-			set_vel.angular.z=-1;
-		}
-		else if(hor_control==-1)
-		{
-			set_vel.angular.z=1;
-		}
-		else if(hor_control==0)
-		{
-			set_vel.angular.z=0;
-		}
+		set_vel.angular.z=vel_ang_z;
 		//kontrola wysokości
-		if(vert_control==1)
-		{
-			set_vel.linear.z=-0.7;
-		}
-		else if(vert_control==-1)
-		{
-			set_vel.linear.z=0.7;
-		}
-		else if(vert_control==0)
-		{
-			set_vel.linear.z=0;
-		}
+		set_vel.linear.z=vel_lin_z;
 		//kontrola odległości
-		if(dist_control==1)
-		{
-			set_vel.linear.x=0.7;
-		}
-		else if(dist_control==-1)
-		{
-			set_vel.linear.x=-0.7;
-		}
-		else if(dist_control==0)
-		{
-			set_vel.linear.x=0;
-		}
+		set_vel.linear.x=vel_lin_x;
 	}
 	else
 	{
@@ -310,4 +270,62 @@ geometry_msgs::Twist setVelocity(bool objectFound)
 		set_vel.angular.z=0;
 	}
 	return set_vel;
+}
+
+
+//klasa PID
+PD::PD(double new_preset)
+{
+	Kp=0.05;
+	Kd=0.05;
+	preset=new_preset;
+	max=1;
+	min=-1;
+	derivative=0;
+	pre_error=0;
+	error=0;
+	dt=1;
+}
+PD::PD( double new_Kp, double new_Kd, double new_dt, double new_max, double new_min, double new_preset)
+{
+	Kp=new_Kp;
+	Kd=new_Kd;
+	preset=new_preset;
+	max=new_max;
+	min=new_min;
+	derivative=0;
+	pre_error=0;
+	error=0;
+	dt=new_dt;
+}
+void PD::setPreset(double new_preset)
+{
+	preset=new_preset;
+}
+double PD::getCurrentControl(double current_value)
+{
+	error=preset-current_value;
+	double Pout = Kp * error;
+
+
+	double derivative = (error - pre_error) / dt;
+	double Dout = Kd * derivative;
+
+	double output = Pout + Dout;
+	//std::cout<< "pierwotny " << output;
+	// Restrict to max/min
+	if( output > max )
+		output = max;
+	else if( output < min )
+		output = min;
+	//std::cout<< " ograniczony " << output << std::endl;
+
+	// Save error to previous error
+	pre_error = error;
+
+	return output;
+}
+PD::~PD()
+{
+
 }

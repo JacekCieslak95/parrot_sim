@@ -37,4 +37,19 @@ cv::Vec3f findBiggestCircle(std::vector<cv::Vec3f>  circles);
 void findControl(cv_bridge::CvImagePtr &cv_ptr, cv::Vec3f biggest);
 geometry_msgs::Twist setVelocity(bool objectFound);
 
+class PD
+{
+private:
+	double Kp, Kd, dt, max, min, preset;
+	double derivative,  pre_error, error;
+	double calculate();
+public:
+	PD(double new_preset);
+	PD( double new_Kp, double new_Kd, double new_dt, double new_max, double new_min, double new_preset);
+	double getCurrentControl(double current_value);
+    void setPreset(double new_preset);
+    ~PD();
+};
+
+
 #endif /* SRC_PARROT_SIM_HEADER_H_ */
