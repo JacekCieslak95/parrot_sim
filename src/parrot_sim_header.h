@@ -28,15 +28,28 @@
 #include <highgui.h>
 #include <math.h>
 
-void imageCb(const sensor_msgs::ImageConstPtr& msg);
-void createTrackbars();
-void imageFilters(cv_bridge::CvImagePtr &cv_ptr, cv::Mat &imgThresholded, char color);
-void drawGrid(cv_bridge::CvImagePtr &cv_ptr, cv::Mat &imgThresholded);
-std::vector<cv::Vec3f> circleFinding(cv_bridge::CvImagePtr &cv_ptr, cv::Mat &imgThresholded);
-cv::Vec3f findBiggestCircle(std::vector<cv::Vec3f>  circles);
-void findControl(cv_bridge::CvImagePtr &cv_ptr, cv::Vec3f biggest);
+
+#define PI 3.14159
+
+using namespace cv;
+using namespace std;
+//funkcje konwertujące rad-deg
+double deg2rad(double angle_in_degrees);
+double rad2deg(double angle_in_radians);
+
+//funkcje pomocnicze
+void drawGrid(Mat &imgThresholded);
+void writeMsg(Mat &imgThresholded);
+void chessboardParam();
+
+//funkcje związane z prędkością
+void findControl(cv_bridge::CvImagePtr &cv_ptr);
 geometry_msgs::Twist setVelocity(bool objectFound);
 
+//funkcja callback
+void imageCb(const sensor_msgs::ImageConstPtr& msg);
+
+//klasa regulatora PD
 class PD
 {
 private:
@@ -50,6 +63,7 @@ public:
     void setPreset(double new_preset);
     ~PD();
 };
+
 
 
 #endif /* SRC_PARROT_SIM_HEADER_H_ */

@@ -2,39 +2,72 @@
 
 
 
-int fontFace = cv::FONT_HERSHEY_DUPLEX;
-//początkowe wartości do filtra. Po dobraniu można to wywalić i w ich miejsce wsadziś stałe
-int iLowH = 68;				//dobrze działa na 68
-int iHighH = 96;			//dobrze działa na 96
 
-int iLowS = 90;				//dobrze działa na 90
-int iHighS = 255;			//dobrze działa na 255
+//zmienne do przechowywania prędkości, pozycji, nastaw
+double vel_lin_x=0;
+double vel_lin_z=0;
+double vel_ang_z=0;
 
-int iLowV = 28;				//dobrze działa na 28
-int iHighV = 190;			//dobrze działa na 190
+double current_x=0;
+double current_y=0;
+double current_z=0;
 
-int circle_filter=70;		//dobrze działa na 100
-int height,width;			//zmienne do przechowywania wymiarów obrazu
-int dist_control; //zmienne globalne, do komunikacji obraz - symulator
+double desired_x=0;
+double desired_y=0;
+double desired_z=120;
+
+//zmienne przechowujące poszczególne regulatory
 //( double new_Kp, double new_Kd, double new_dt, double new_max, double new_min, double new_preset)
+PD PD_vert(0.01, 0.01, 1, 1, -1, desired_x);
+PD PD_hor(0.01, 0.01, 1, 1, -1, desired_y);
+PD PD_dist(0.01, 0.01, 1, 1, -1, desired_z);
 
-PD PD_vert(0.01, 0.01, 1, 1, -1, 240);
-PD PD_hor(0.01, 0.01, 1, 1, -1, 320);
-PD PD_dist(0.05, 0.05, 1, 1, -1, 60);
-
-double vel_lin_x, vel_lin_z, vel_ang_z;
-
+//zmienna przechowująca informacje o odnalezieniu obiektu
 bool found=false;
+
+
+//Zmienne pomocnicze do wyswietlania komunikatów
+int fontFace = FONT_HERSHEY_DUPLEX;
+Point hor_text_base(0, 0);
+Point vert_text_base(0, 0);
+Point dist_text_base(0, 0);
+string hor_msg;
+string vert_msg;
+string dist_msg;
+int hor_state=-1;
+int vert_state=-1;
+int dist_state=-1;
+
+
+//zmienne do odczytywania i identyfikacji obrazu
+bool first_run=true;
+int height,width;			//zmienne do przechowywania wymiarów obrazu
+Mat camera_matrix;
+Mat dist_coeffs;
+Mat imgOriginal_8bit; //obiekt, w którym bedzie przechowana skonwertowana klatka - wymaga tego jedna z funkcji
+Mat rotation_vector(3,1,DataType<double>::type); // Rotation in axis-angle form
+Mat rotation_array(3,3,DataType<double>::type);
+Mat translation_vector(3,1,DataType<double>::type);
+
+Point2d center;
+
+vector<Point2f> corners; //wektor elementow point2f - przechowa wspolrzedne znalezionych krancow pol szachownicy
+vector<Point3f> corners_3d;
+
+//dane dot. planszy
+int l_punktow;
+int pattern_colls=4;
+int pattern_rows=7;
+Size patternsize(pattern_colls,pattern_rows); //funkcja findchessboardcorners musi znac wielkosc szachownicy - podaje ja tutaj
+float bok_kwad=8.0; //w centymetrach
 
 image_transport::Subscriber image_sub_; //do subskrypcji obrazu
 image_transport::Publisher image_pub_;	//do publikacji przerobionego obrazu
 ros::Publisher control_pub;
 
-
 int main(int argc, char** argv)
 {
-	std::cout<<"Parrot_sim started!"<<std::endl;
-	dist_control=0; //przypisanie sterowania
+	cout<<"Parrot_sim started!"<<endl;
 	ros::init(argc, argv, "image_converter");
 	ros::NodeHandle nh;
 	ros::Publisher image_pub_;
@@ -42,13 +75,10 @@ int main(int argc, char** argv)
 	geometry_msgs::Twist vel_msg;
 	image_pub_ = nh.advertise<sensor_msgs::Image>("/image_converter/output_video", 1);
 	control_pub = nh.advertise<geometry_msgs::Twist>("/cmd_vel", 10);
-	std::cout << "start" <<std::endl;
 	ros::Subscriber image_sub_;
 	image_sub_ = nh.subscribe("/camera/image", 1,	imageCb);
 
-	//tworzenie okna i suwaków do kontroli
-	createTrackbars();
-	cv::namedWindow("Window with detection");
+	//Główna pętla - ciągłe ustawianie prędkości;
 	while(nh.ok())
 	{
 		vel_msg=setVelocity(found);
@@ -56,8 +86,7 @@ int main(int argc, char** argv)
 		ros::spinOnce();
 	};
 
-	cv::destroyWindow("Window with detection");
-	std::cout<<std::endl<<"Parrot_sim closed!"<<std::endl;
+	cout<<endl<<"Parrot_sim closed!"<<endl;
 	return 0;
 }
 
@@ -77,166 +106,217 @@ void imageCb(const sensor_msgs::ImageConstPtr& msg)
 
 	if (cv_ptr->image.rows > 60 && cv_ptr->image.cols > 60)
 	{
-
-		height = cv_ptr->image.rows;
-		width = cv_ptr->image.cols;
-		cv::Mat imgThresholded;
-		imageFilters(cv_ptr, imgThresholded, 'a'); //nałożenie filtrów i zapisywanie obrazu do "imgThresholded"
-		std::vector<cv::Vec3f> circles = circleFinding(cv_ptr, imgThresholded); //przeszukanie obrazu w poszukwaniu kółek i zapisanie do wektora
-		drawGrid(cv_ptr, imgThresholded);
-		if(!circles.empty())
+		if(first_run)
 		{
-			found=true;
-			cv::Vec3f biggest_circle = findBiggestCircle(circles);
-			findControl(cv_ptr,biggest_circle);
+			first_run=false;
+			//ustalenie parametrów obrazu
+			height = cv_ptr->image.rows;
+			width = cv_ptr->image.cols;
+			center = Point2d(cv_ptr->image.cols/2,cv_ptr->image.rows/2);
+			camera_matrix = (Mat_<double>(3,3) << width, 0, center.x, 0 , width, center.y, 0, 0, 1);
+			dist_coeffs =Mat::zeros(4,1,DataType<double>::type); // Assuming no lens distortion
+			cout << "Camera Matrix " << endl << camera_matrix << endl;
+
+			//ustalenie miejsca wyświetlania komunikatów
+			hor_text_base.x=0;
+			hor_text_base.y=height-10;
+			vert_text_base.x=0;
+			vert_text_base.y=height-40;
+			dist_text_base.x=0;
+			dist_text_base.y=height-70;
+
+			//ustalenie parametrów szachownicy, wypełnienie wektorów punktami
+			chessboardParam();
 		}
-		else
+
+		cv_ptr->image.convertTo(imgOriginal_8bit, CV_8U); //konwersja do 8-bitowej glebi - takie obrazy przyjmuje funkcja znajdujaca findchessboardcorners()
+		//poszukiwanie szachownicy
+		bool patternfound = findChessboardCorners(imgOriginal_8bit, patternsize, corners, CALIB_CB_ADAPTIVE_THRESH + CALIB_CB_NORMALIZE_IMAGE + CALIB_CB_FAST_CHECK);
+
+		if (!patternfound)
 		{
 			found=false;
-			cv::Point info_text_base(0, height-40);
-			cv::putText(cv_ptr->image, "no object found!", info_text_base, fontFace, 1, CV_RGB(200,0,0), 1, 8);
-
+			hor_state=vert_state=dist_state=-1;
+			hor_msg="";
+			vert_msg="Chessboard not found";
+			dist_msg="";
+			//cout<<"Nie znalazlem szachownicy!"<<endl;
 		}
-		//cv::imshow("Green detection", imgThresholded); 			//Pokaż przefiltrowany obraz
-		cv::imshow("Window with detection", cv_ptr->image);		//Pokaż obraz z nałożonymi kołami
-		cv::waitKey(3);
-		// opublikowanie przerobionego obrazu
+		if (patternfound)
+		{
+			found=true;
+			solvePnP(corners_3d, corners, camera_matrix, dist_coeffs, rotation_vector, translation_vector);
+			Rodrigues(rotation_vector, rotation_array);
+
+			//cout<<"Wektor rotacji"<<rotation_vector<<endl;
+			//cout<<"Wektor translacji "<<translation_vector<<endl;
+			current_x=translation_vector.at<double>(0,0);
+			current_y=translation_vector.at<double>(1,0);
+			current_z=translation_vector.at<double>(2,0);
+			cout<<"x: "<< current_x << " y: "<< current_y << " z: "<< current_z << endl;
+			findControl(cv_ptr);
+		}
+		drawChessboardCorners(imgOriginal_8bit, patternsize, corners, patternfound); //rysowanie linii
+		//rysowanie komunikatów i siatki
+		writeMsg(imgOriginal_8bit);
+		drawGrid(imgOriginal_8bit);
+
+		imshow ("Original", imgOriginal_8bit);//wyrzucenie do okna
 		image_pub_.publish(cv_ptr->toImageMsg());
+
+		waitKey(3);
+
 	}
 }
-void createTrackbars()
+
+void drawGrid(Mat &imgThresholded)
 {
-	cv::namedWindow("Control",  CV_WINDOW_AUTOSIZE);
+	Point left(0, height/2);
+	Point right(width, height/2);
+	Point top(width/2, 0);
+	Point bottom(width/2, height);
+	//line(Mat& img, Point pt1, Point pt2, const Scalar& color, int thickness=1, int lineType=8, int shift=0)
 
-	cvCreateTrackbar("LowH", "Control", &iLowH, 179); //Hue (0 - 179)
-	cvCreateTrackbar("HighH", "Control", &iHighH, 179);
-
-	cvCreateTrackbar("LowS", "Control", &iLowS, 255); //Saturation (0 - 255)
-	cvCreateTrackbar("HighS", "Control", &iHighS, 255);
-
-	cvCreateTrackbar("LowV", "Control", &iLowV, 255); //Value (0 - 255)
-	cvCreateTrackbar("HighV", "Control", &iHighV, 255);
-
-	cvCreateTrackbar("Circle filter", "Control", &circle_filter, 255);
+	line(imgThresholded, left, right, Scalar(160, 160, 160), 0.5);
+	line(imgThresholded, top, bottom, Scalar(160, 160, 160), 0.5);
 }
-void imageFilters(cv_bridge::CvImagePtr &cv_ptr, cv::Mat &imgThresholded, char color)
+void writeMsg(Mat &imgThresholded)
 {
-	//w późniejszym czasue można ustalić wzorce dla konkretnych kolorów (przekazywanych w arkumencie "char color"
-	//wtedy w zależności od przekazywanego znaku ustala się wartości iLowH, iLowS, iLowV, iHighH, iHighS, iHighV
-	cv::Mat imgHSV;
-	cv::cvtColor(cv_ptr->image, imgHSV, cv::COLOR_BGR2HSV); //Convert the captured frame from BGR to HSV
+	if(hor_state==-1)
+	{
+		putText(imgThresholded, hor_msg, hor_text_base, fontFace, 1, CV_RGB(204,0,0), 1, 8);
+	}
+	else if(hor_state==0)
+	{
+		putText(imgThresholded, hor_msg, hor_text_base, fontFace, 1, CV_RGB(0,204,0), 1, 8);
+	}
+	else if(hor_state==1)
+	{
+		putText(imgThresholded, hor_msg, hor_text_base, fontFace, 1, CV_RGB(204,204,0), 1, 8);
+	}
 
+	if(vert_state==-1)
+	{
+		putText(imgThresholded, vert_msg, vert_text_base, fontFace, 1, CV_RGB(204,0,0), 1, 8);
+	}
+	else if(vert_state==0)
+	{
+		putText(imgThresholded, vert_msg, vert_text_base, fontFace, 1, CV_RGB(0,204,0), 1, 8);
+	}
+	else if(vert_state==1)
+	{
+		putText(imgThresholded, vert_msg, vert_text_base, fontFace, 1, CV_RGB(204,204,0), 1, 8);
+	}
 
-	//Nałożenie filtrów ( z suwaków)
-	cv::inRange(imgHSV, cv::Scalar(iLowH, iLowS, iLowV), cv::Scalar(iHighH, iHighS, iHighV), imgThresholded); //Threshold the image
-
-	//morphological opening (remove small objects from the foreground)
-	cv::erode(imgThresholded, imgThresholded, cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(5, 5)) );
-	cv::dilate( imgThresholded, imgThresholded, cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(5, 5)) );
-
-	//morphological closing (fill small holes in the foreground)
-	cv::dilate( imgThresholded, imgThresholded, cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(5, 5)) );
-	cv::erode(imgThresholded, imgThresholded, cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(5, 5)) );
-
-	//detekcja
-	cv::GaussianBlur( imgThresholded, imgThresholded, cv::Size(9, 9), 2, 2 );
+	if(dist_state==-1)
+	{
+		putText(imgThresholded, dist_msg, dist_text_base, fontFace, 1, CV_RGB(204,0,0), 1, 8);
+	}
+	else if(dist_state==0)
+	{
+		putText(imgThresholded, dist_msg, dist_text_base, fontFace, 1, CV_RGB(0,204,0), 1, 8);
+	}
+	else if(dist_state==1)
+	{
+		putText(imgThresholded, dist_msg, dist_text_base, fontFace, 1, CV_RGB(204,204,0), 1, 8);
+	}
 }
-void drawGrid(cv_bridge::CvImagePtr &cv_ptr, cv::Mat &imgThresholded)
+void chessboardParam()
 {
-	cv::Point left(0, height/2);
-	cv::Point right(width, height/2);
-	cv::Point top(width/2, 0);
-	cv::Point bottom(width/2, height);
-	//cv::line(Mat& img, Point pt1, Point pt2, const Scalar& color, int thickness=1, int lineType=8, int shift=0)
-	cv::line(cv_ptr->image, left, right, cv::Scalar(160, 160, 160), 0.5);
-	cv::line(cv_ptr->image, top, bottom, cv::Scalar(160, 160, 160), 0.5);
+	l_punktow=pattern_rows*pattern_colls;
 
-	cv::line(imgThresholded, left, right, cv::Scalar(160, 160, 160), 0.5);
-	cv::line(imgThresholded, top, bottom, cv::Scalar(160, 160, 160), 0.5);
-}
-std::vector<cv::Vec3f> circleFinding(cv_bridge::CvImagePtr &cv_ptr, cv::Mat &imgThresholded)
+				for (int p=0; p<l_punktow; p++)
 				{
-	std::vector<cv::Vec3f> circles;												// wektor przechowujący parametry kółek
-	cv::HoughCircles(imgThresholded, circles, CV_HOUGH_GRADIENT,
-			2, imgThresholded.rows  /4, 200, circle_filter );					// Wykrywanie kółek
-	for( size_t i = 0; i < circles.size(); i++ )								// pętla rysująca kołka, centra, i opisy
-	{
-		cv::Point center(cvRound(circles[i][0]), cvRound(circles[i][1]));
-		int radius = cvRound(circles[i][2]);
-		cv::Point text_base(cvRound(circles[i][0]) + radius, cvRound(circles[i][1]) +radius) ;
-		// draw the circle center
-		cv::circle( cv_ptr->image, center, 3, cv::Scalar(0,255,0), -1, 8, 0 );
-		// draw the circle outline
-		cv::circle( cv_ptr->image, center, radius, cv::Scalar(0,0,255), 3, 8, 0 );
-	}
-	return circles;
+
+					corners_3d.push_back(Point3d(0,0,0));
+
 				}
-cv::Vec3f findBiggestCircle(std::vector<cv::Vec3f> circles)
-{
-	cv::Vec3f biggest;
-	int radius = 0;
-	int biggest_index=0;
-	for( size_t i = 0; i < circles.size(); i++ )								// pętla rysująca kołka, centra, i opisy
-	{
-		if (cvRound(circles[i][2])>=radius) biggest_index=i;
-	}
-	biggest[0]=circles[biggest_index][0];
-	biggest[1]=circles[biggest_index][1];
-	biggest[2]=circles[biggest_index][2];
-	return biggest;
+				corners_3d[0].x=-bok_kwad*((pattern_colls-1.0)/2.0);
+				corners_3d[0].y=-bok_kwad*((pattern_rows-1.0)/2.0);
+				corners_3d[0].z=0;
+
+				for (int i=1; i<l_punktow; i++)
+				{
+
+					corners_3d[i].x=corners_3d[i-1].x+bok_kwad;
+
+					if ((i+1)%pattern_colls==0) // (jak dojedzie do konca wiersza to zeruj x, zwiększ y o wysokosc kwadratu - wypelniamy wyższy wiersz od lewej
+					{
+						corners_3d[i].x=0;
+						corners_3d[i].y=corners_3d[i-1].y+bok_kwad;
+
+					}
+
+					else
+
+					{
+						corners_3d[i].y=corners_3d[i-1].y; //jak nie dojechal, to nie zmieniaj wysokosci y
+					}
+
+					corners_3d[i].z=0; //bo szachownica jest plaska
+				}
+
 }
-void findControl(cv_bridge::CvImagePtr &cv_ptr, cv::Vec3f biggest)
+
+void findControl(cv_bridge::CvImagePtr &cv_ptr)
 {
-	cv::Point hor_text_base(0, height-10);
-	cv::Point vert_text_base(0, height-40);
-	cv::Point dist_text_base(0, height-70);
-	if (biggest[0]< (width/2-(biggest[2]/3)))
+
+	if (current_x< (desired_x-5))
 	{
-		cv::putText(cv_ptr->image, "go right!", hor_text_base, fontFace, 1, CV_RGB(204,204,0), 1, 8);
-		vel_ang_z=PD_hor.getCurrentControl(biggest[0]);
+		hor_state=1;
+		hor_msg="go right!";
+		vel_ang_z=PD_hor.getCurrentControl(current_x);
 	}
-	else if (biggest[0]> (width/2+(biggest[2]/3)))
+	else if (current_x> (desired_x+5))
 	{
-		cv::putText(cv_ptr->image, "go left!", hor_text_base, fontFace, 1, CV_RGB(204,204,0), 1, 8);
-		vel_ang_z=PD_hor.getCurrentControl(biggest[0]);
+		hor_state=1;
+		hor_msg="go left!";
+		vel_ang_z=PD_hor.getCurrentControl(current_x);
 	}
 	else
 	{
-		cv::putText(cv_ptr->image, "Horizonal - OK", hor_text_base, fontFace, 1, CV_RGB(0,204,0), 1, 8);
-		vel_ang_z=0;//PD_hor.getCurrentControl(biggest[0]);
+		hor_state=0;
+		hor_msg="Horizonal - OK";
+		vel_ang_z=0;
 	}
 
-	if (biggest[1]< (height/2-(biggest[2]/3)))
+	if (current_y< (desired_y-5))
 	{
-		cv::putText(cv_ptr->image, "go up!", vert_text_base, fontFace, 1, CV_RGB(204,204,0), 1, 8);
-		vel_lin_z=PD_vert.getCurrentControl(biggest[1]);
+		vert_state=1;
+		vert_msg="go up!";
+		vel_lin_z=PD_vert.getCurrentControl(current_y);
 
 	}
-	else if (biggest[1]> (height/2+(biggest[2]/3)))
+	else if (current_y> (desired_y+5))
 	{
-		cv::putText(cv_ptr->image, "go down!", vert_text_base, fontFace, 1, CV_RGB(204,204,0), 1, 8);
-		vel_lin_z=PD_vert.getCurrentControl(biggest[1]);
+		vert_state=1;
+		vert_msg="go down!";
+		vel_lin_z=PD_vert.getCurrentControl(current_y);
 	}
 	else
 	{
-		cv::putText(cv_ptr->image, "Vertical - OK", vert_text_base, fontFace, 1, CV_RGB(0,204,0), 1, 8);
+		vert_state=0;
+		vert_msg="Vertical - OK";
 		vel_lin_z=0;//PD_vert.getCurrentControl(biggest[1]);
 	}
 
-	if (cvRound(biggest[2])<50)
+	if (current_z< (desired_z-5))
 	{
-		cv::putText(cv_ptr->image, "too far!", dist_text_base, fontFace, 1, CV_RGB(204,204,0), 1, 8);
-		vel_lin_x=PD_dist.getCurrentControl(biggest[2]);
+		dist_state=1;
+		dist_msg="too close!";
+		vel_lin_x=PD_dist.getCurrentControl(current_z);
 
 	}
-	else if (cvRound(biggest[2])>70)
+	else if (current_z> (desired_z+5))
 	{
-		cv::putText(cv_ptr->image, "too close!", dist_text_base, fontFace, 1, CV_RGB(204,204,0), 1, 8);
-		vel_lin_x=PD_dist.getCurrentControl(biggest[2]);
+		dist_state=1;
+		dist_msg="too far!";
+		vel_lin_x=PD_dist.getCurrentControl(current_z);
 	}
 	else
 	{
-		cv::putText(cv_ptr->image, "Distance - OK", dist_text_base, fontFace, 1, CV_RGB(0,204,0), 1, 8);
+		dist_state=0;
+		dist_msg="Distance - OK";
 		vel_lin_x=0;//PD_dist.getCurrentControl(biggest[2]);
 	}
 
@@ -258,7 +338,7 @@ geometry_msgs::Twist setVelocity(bool objectFound)
 		//kontrola wysokości
 		set_vel.linear.z=vel_lin_z;
 		//kontrola odległości
-		set_vel.linear.x=vel_lin_x;
+		set_vel.linear.x=-vel_lin_x;
 	}
 	else
 	{
@@ -307,20 +387,17 @@ double PD::getCurrentControl(double current_value)
 	error=preset-current_value;
 	double Pout = Kp * error;
 
-
 	double derivative = (error - pre_error) / dt;
 	double Dout = Kd * derivative;
 
 	double output = Pout + Dout;
-	//std::cout<< "pierwotny " << output;
-	// Restrict to max/min
+	//cout<< "pierwotny " << output;
 	if( output > max )
 		output = max;
 	else if( output < min )
 		output = min;
-	//std::cout<< " ograniczony " << output << std::endl;
+	//cout<< " ograniczony " << output << endl;
 
-	// Save error to previous error
 	pre_error = error;
 
 	return output;
