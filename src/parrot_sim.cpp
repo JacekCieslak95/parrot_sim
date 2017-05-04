@@ -14,7 +14,7 @@ double current_z=0;
 
 double desired_x=0;
 double desired_y=0;
-double desired_z=120;
+double desired_z=150;
 
 //zmienne przechowujące poszczególne regulatory
 //( double new_Kp, double new_Kd, double new_dt, double new_max, double new_min, double new_preset)
@@ -24,7 +24,7 @@ PD PD_dist(0.01, 0.01, 1, 1, -1, desired_z);
 
 //zmienna przechowująca informacje o odnalezieniu obiektu
 bool found=false;
-
+bool too_low=false;
 
 //Zmienne pomocnicze do wyswietlania komunikatów
 int fontFace = FONT_HERSHEY_DUPLEX;
@@ -55,11 +55,7 @@ vector<Point2f> corners; //wektor elementow point2f - przechowa wspolrzedne znal
 vector<Point3f> corners_3d;
 
 //dane dot. planszy
-int l_punktow;
-int pattern_colls=4;
-int pattern_rows=7;
 Size patternsize(pattern_colls,pattern_rows); //funkcja findchessboardcorners musi znac wielkosc szachownicy - podaje ja tutaj
-float bok_kwad=8.0; //w centymetrach
 
 image_transport::Subscriber image_sub_; //do subskrypcji obrazu
 image_transport::Publisher image_pub_;	//do publikacji przerobionego obrazu
@@ -67,8 +63,9 @@ ros::Publisher control_pub;
 
 int main(int argc, char** argv)
 {
+
 	cout<<"Parrot_sim started!"<<endl;
-	ros::init(argc, argv, "image_converter");
+	ros::init(argc, argv, "parrot_sim");
 	ros::NodeHandle nh;
 	ros::Publisher image_pub_;
 	ros::Publisher control_pub;
@@ -76,7 +73,14 @@ int main(int argc, char** argv)
 	image_pub_ = nh.advertise<sensor_msgs::Image>("/image_converter/output_video", 1);
 	control_pub = nh.advertise<geometry_msgs::Twist>("/cmd_vel", 10);
 	ros::Subscriber image_sub_;
-	image_sub_ = nh.subscribe("/camera/image", 1,	imageCb);
+	ros::Subscriber alt_sub;
+
+
+	//subskrybowanie obrazu z konkretnego topicu:
+	//image_sub_ = nh.subscribe("/ardrone/front/image_raw",	1, imageCb);  //fizyczny AR.DRONE 2.0
+	image_sub_ = nh.subscribe("/camera/image",	1,	imageCb); //Wewnęrzna kamera web, imitowana przez image_publisher
+
+	alt_sub = nh.subscribe("/sonar_height", 100, altCb);
 
 	//Główna pętla - ciągłe ustawianie prędkości;
 	while(nh.ok())
@@ -90,6 +94,12 @@ int main(int argc, char** argv)
 	return 0;
 }
 
+//Funkcje CallBack
+void altCb(const sensor_msgs::Range& msg)
+{
+	if(msg.range<=min_alt)	too_low=true;
+	else too_low=false;
+}
 void imageCb(const sensor_msgs::ImageConstPtr& msg)
 {
 	//przekopiowanie wiadomości do wskaźnika (?)
@@ -140,6 +150,8 @@ void imageCb(const sensor_msgs::ImageConstPtr& msg)
 			hor_msg="";
 			vert_msg="Chessboard not found";
 			dist_msg="";
+			findControl(cv_ptr);
+
 			//cout<<"Nie znalazlem szachownicy!"<<endl;
 		}
 		if (patternfound)
@@ -153,7 +165,14 @@ void imageCb(const sensor_msgs::ImageConstPtr& msg)
 			current_x=translation_vector.at<double>(0,0);
 			current_y=translation_vector.at<double>(1,0);
 			current_z=translation_vector.at<double>(2,0);
-			cout<<"x: "<< current_x << " y: "<< current_y << " z: "<< current_z << endl;
+			/*
+			double phi, theta, psi;
+			phi=rad2deg(translation_vector.at<double>(0,0));
+			theta = rad2deg(translation_vector.at<double>(1,0));
+			psi=rad2deg(translation_vector.at<double>(2,0));
+			*/
+			//cout << "phi " << phi <<" theta " << theta << " psi " <<  psi<<endl;
+			//cout<<"x: "<< current_x << " y: "<< current_y << " z: "<< current_z << endl;
 			findControl(cv_ptr);
 		}
 		drawChessboardCorners(imgOriginal_8bit, patternsize, corners, patternfound); //rysowanie linii
@@ -169,6 +188,7 @@ void imageCb(const sensor_msgs::ImageConstPtr& msg)
 	}
 }
 
+//Funkcje rysujące + wpisywanie parametrów szachownicy
 void drawGrid(Mat &imgThresholded)
 {
 	Point left(0, height/2);
@@ -223,100 +243,141 @@ void writeMsg(Mat &imgThresholded)
 }
 void chessboardParam()
 {
-	l_punktow=pattern_rows*pattern_colls;
+	//l_punktow=pattern_rows*pattern_colls;
 
-				for (int p=0; p<l_punktow; p++)
-				{
+	for (int p=0; p<l_punktow; p++)
+	{
 
-					corners_3d.push_back(Point3d(0,0,0));
+		corners_3d.push_back(Point3d(0,0,0));
 
-				}
-				corners_3d[0].x=-bok_kwad*((pattern_colls-1.0)/2.0);
-				corners_3d[0].y=-bok_kwad*((pattern_rows-1.0)/2.0);
-				corners_3d[0].z=0;
+	}
+	corners_3d[0].x=-bok_kwad*((pattern_colls-1.0)/2.0);
+	corners_3d[0].y=-bok_kwad*((pattern_rows-1.0)/2.0);
+	corners_3d[0].z=0;
 
-				for (int i=1; i<l_punktow; i++)
-				{
+	for (int i=1; i<l_punktow; i++)
+	{
 
-					corners_3d[i].x=corners_3d[i-1].x+bok_kwad;
+		corners_3d[i].x=corners_3d[i-1].x+bok_kwad;
 
-					if ((i+1)%pattern_colls==0) // (jak dojedzie do konca wiersza to zeruj x, zwiększ y o wysokosc kwadratu - wypelniamy wyższy wiersz od lewej
-					{
-						corners_3d[i].x=0;
-						corners_3d[i].y=corners_3d[i-1].y+bok_kwad;
+		if ((i+1)%pattern_colls==0) // (jak dojedzie do konca wiersza to zeruj x, zwiększ y o wysokosc kwadratu - wypelniamy wyższy wiersz od lewej
+		{
+			corners_3d[i].x=0;
+			corners_3d[i].y=corners_3d[i-1].y+bok_kwad;
 
-					}
+		}
 
-					else
+		else
 
-					{
-						corners_3d[i].y=corners_3d[i-1].y; //jak nie dojechal, to nie zmieniaj wysokosci y
-					}
+		{
+			corners_3d[i].y=corners_3d[i-1].y; //jak nie dojechal, to nie zmieniaj wysokosci y
+		}
 
-					corners_3d[i].z=0; //bo szachownica jest plaska
-				}
+		corners_3d[i].z=0; //bo szachownica jest plaska
+	}
 
 }
 
+//funkcje konwertujące deg-rad
+double deg2rad(double angle_in_degrees)
+{
+	angle_in_degrees=fmod((angle_in_degrees+360),360);
+	return angle_in_degrees * PI / 180.0;
+}
+double rad2deg(double angle_in_radians)
+{
+	angle_in_radians=fmod((angle_in_radians+2*PI),(2*PI));
+	return angle_in_radians * 180.0 / PI;
+}
+
+//funkcje odpowiedzialne za kontrole prędkości
 void findControl(cv_bridge::CvImagePtr &cv_ptr)
 {
 
 	if (current_x< (desired_x-5))
 	{
 		hor_state=1;
-		hor_msg="go right!";
+		hor_msg="go right! x=";
+		ostringstream convert;   // stream used for the conversion
+		convert <<hor_msg << current_x;      // insert the textual representation of 'Number' in the characters in the stream
+		hor_msg = convert.str();
 		vel_ang_z=PD_hor.getCurrentControl(current_x);
 	}
 	else if (current_x> (desired_x+5))
 	{
 		hor_state=1;
-		hor_msg="go left!";
+		hor_msg="go left! x=";
+		ostringstream convert;   // stream used for the conversion
+		convert <<hor_msg << current_x;      // insert the textual representation of 'Number' in the characters in the stream
+		hor_msg = convert.str();
 		vel_ang_z=PD_hor.getCurrentControl(current_x);
 	}
 	else
 	{
 		hor_state=0;
 		hor_msg="Horizonal - OK";
+		ostringstream convert;   // stream used for the conversion
+		convert <<hor_msg << current_x;      // insert the textual representation of 'Number' in the characters in the stream
+		hor_msg = convert.str();
 		vel_ang_z=0;
 	}
 
 	if (current_y< (desired_y-5))
 	{
 		vert_state=1;
-		vert_msg="go up!";
+		vert_msg="go up! y=";
+		ostringstream convert;   // stream used for the conversion
+		convert <<vert_msg << current_y;      // insert the textual representation of 'Number' in the characters in the stream
+		vert_msg = convert.str();
 		vel_lin_z=PD_vert.getCurrentControl(current_y);
 
 	}
 	else if (current_y> (desired_y+5))
 	{
+		if(!too_low)
 		vert_state=1;
-		vert_msg="go down!";
+		vert_msg="go down! y=";
+		ostringstream convert;   // stream used for the conversion
+		convert <<vert_msg << current_y;      // insert the textual representation of 'Number' in the characters in the stream
+		vert_msg = convert.str();
 		vel_lin_z=PD_vert.getCurrentControl(current_y);
 	}
 	else
 	{
 		vert_state=0;
 		vert_msg="Vertical - OK";
+		ostringstream convert;   // stream used for the conversion
+		convert <<vert_msg << current_y;      // insert the textual representation of 'Number' in the characters in the stream
+		vert_msg = convert.str();
 		vel_lin_z=0;//PD_vert.getCurrentControl(biggest[1]);
 	}
 
 	if (current_z< (desired_z-5))
 	{
 		dist_state=1;
-		dist_msg="too close!";
+		dist_msg="too close! z=";
+		ostringstream convert;   // stream used for the conversion
+		convert <<dist_msg << current_z;      // insert the textual representation of 'Number' in the characters in the stream
+		dist_msg = convert.str();
 		vel_lin_x=PD_dist.getCurrentControl(current_z);
 
 	}
 	else if (current_z> (desired_z+5))
 	{
 		dist_state=1;
-		dist_msg="too far!";
+		dist_msg="too far! z=";
+		ostringstream convert;   // stream used for the conversion
+		convert <<dist_msg << current_z;      // insert the textual representation of 'Number' in the characters in the stream
+		dist_msg = convert.str();
 		vel_lin_x=PD_dist.getCurrentControl(current_z);
 	}
 	else
 	{
 		dist_state=0;
 		dist_msg="Distance - OK";
+		ostringstream convert;   // stream used for the conversion
+		convert <<dist_msg << current_z;      // insert the textual representation of 'Number' in the characters in the stream
+		dist_msg = convert.str();
 		vel_lin_x=0;//PD_dist.getCurrentControl(biggest[2]);
 	}
 
@@ -349,9 +410,9 @@ geometry_msgs::Twist setVelocity(bool objectFound)
 		set_vel.angular.y=0;
 		set_vel.angular.z=0;
 	}
+	if(too_low&&(vel_lin_z<0)) set_vel.linear.z=0;
 	return set_vel;
 }
-
 
 //klasa PID
 PD::PD(double new_preset)
