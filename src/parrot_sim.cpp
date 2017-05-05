@@ -14,7 +14,7 @@ double current_z=0;
 
 double desired_x=0;
 double desired_y=0;
-double desired_z=150;
+double desired_z=80;
 
 //zmienne przechowujące poszczególne regulatory
 //( double new_Kp, double new_Kd, double new_dt, double new_max, double new_min, double new_preset)
@@ -150,9 +150,6 @@ void imageCb(const sensor_msgs::ImageConstPtr& msg)
 			hor_msg="";
 			vert_msg="Chessboard not found";
 			dist_msg="";
-			findControl(cv_ptr);
-
-			//cout<<"Nie znalazlem szachownicy!"<<endl;
 		}
 		if (patternfound)
 		{
@@ -315,7 +312,7 @@ void findControl(cv_bridge::CvImagePtr &cv_ptr)
 	else
 	{
 		hor_state=0;
-		hor_msg="Horizonal - OK";
+		hor_msg="Horizonal - OK x=";
 		ostringstream convert;   // stream used for the conversion
 		convert <<hor_msg << current_x;      // insert the textual representation of 'Number' in the characters in the stream
 		hor_msg = convert.str();
@@ -345,7 +342,7 @@ void findControl(cv_bridge::CvImagePtr &cv_ptr)
 	else
 	{
 		vert_state=0;
-		vert_msg="Vertical - OK";
+		vert_msg="Vertical - OK y=";
 		ostringstream convert;   // stream used for the conversion
 		convert <<vert_msg << current_y;      // insert the textual representation of 'Number' in the characters in the stream
 		vert_msg = convert.str();
@@ -374,7 +371,7 @@ void findControl(cv_bridge::CvImagePtr &cv_ptr)
 	else
 	{
 		dist_state=0;
-		dist_msg="Distance - OK";
+		dist_msg="Distance - OK z=";
 		ostringstream convert;   // stream used for the conversion
 		convert <<dist_msg << current_z;      // insert the textual representation of 'Number' in the characters in the stream
 		dist_msg = convert.str();
