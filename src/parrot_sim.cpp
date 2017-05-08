@@ -14,13 +14,13 @@ double current_z=0;
 
 double desired_x=0;
 double desired_y=0;
-double desired_z=80;
+double desired_z=60;
 
 //zmienne przechowujące poszczególne regulatory
 //( double new_Kp, double new_Kd, double new_dt, double new_max, double new_min, double new_preset)
-PD PD_vert(0.01, 0.01, 1, 1, -1, desired_x);
-PD PD_hor(0.01, 0.01, 1, 1, -1, desired_y);
-PD PD_dist(0.01, 0.01, 1, 1, -1, desired_z);
+PD PD_vert(0.02, 0.02, 1, 1, -1, desired_x);
+PD PD_hor(0.02, 0.02, 1, 1, -1, desired_y);
+PD PD_dist(0.02, 0.02, 1, 1, -1, desired_z);
 
 //zmienna przechowująca informacje o odnalezieniu obiektu
 bool found=false;
@@ -162,6 +162,9 @@ void imageCb(const sensor_msgs::ImageConstPtr& msg)
 			current_x=translation_vector.at<double>(0,0);
 			current_y=translation_vector.at<double>(1,0);
 			current_z=translation_vector.at<double>(2,0);
+			//korekta
+			current_z=(1-0.24)*current_z;
+
 			/*
 			double phi, theta, psi;
 			phi=rad2deg(translation_vector.at<double>(0,0));

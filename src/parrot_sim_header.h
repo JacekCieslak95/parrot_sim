@@ -36,7 +36,7 @@
 //definicje danych dotyczących planszy
 #define pattern_colls 8
 #define pattern_rows 5
-#define bok_kwad 3.0
+#define bok_kwad 2.85
 #define l_punktow (pattern_colls*pattern_rows)
 
 
