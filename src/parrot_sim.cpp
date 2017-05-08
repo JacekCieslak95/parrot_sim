@@ -298,27 +298,27 @@ void findControl(cv_bridge::CvImagePtr &cv_ptr)
 	{
 		hor_state=1;
 		hor_msg="go right! x=";
-		ostringstream convert;   // stream used for the conversion
-		convert <<hor_msg << current_x;      // insert the textual representation of 'Number' in the characters in the stream
-		hor_msg = convert.str();
+		stringstream stream;
+		stream << hor_msg << fixed << setprecision(2) << current_x;
+		hor_msg = stream.str();
 		vel_ang_z=PD_hor.getCurrentControl(current_x);
 	}
 	else if (current_x> (desired_x+5))
 	{
 		hor_state=1;
 		hor_msg="go left! x=";
-		ostringstream convert;   // stream used for the conversion
-		convert <<hor_msg << current_x;      // insert the textual representation of 'Number' in the characters in the stream
-		hor_msg = convert.str();
+		stringstream stream;
+		stream << hor_msg << fixed << setprecision(2) << current_x;
+		hor_msg = stream.str();
 		vel_ang_z=PD_hor.getCurrentControl(current_x);
 	}
 	else
 	{
 		hor_state=0;
 		hor_msg="Horizonal - OK x=";
-		ostringstream convert;   // stream used for the conversion
-		convert <<hor_msg << current_x;      // insert the textual representation of 'Number' in the characters in the stream
-		hor_msg = convert.str();
+		stringstream stream;
+		stream << hor_msg << fixed << setprecision(2) << current_x;
+		hor_msg = stream.str();
 		vel_ang_z=0;
 	}
 
@@ -326,9 +326,9 @@ void findControl(cv_bridge::CvImagePtr &cv_ptr)
 	{
 		vert_state=1;
 		vert_msg="go up! y=";
-		ostringstream convert;   // stream used for the conversion
-		convert <<vert_msg << current_y;      // insert the textual representation of 'Number' in the characters in the stream
-		vert_msg = convert.str();
+		stringstream stream;
+		stream << vert_msg << fixed << setprecision(2) << current_y;
+		vert_msg = stream.str();
 		vel_lin_z=PD_vert.getCurrentControl(current_y);
 
 	}
@@ -337,18 +337,18 @@ void findControl(cv_bridge::CvImagePtr &cv_ptr)
 		if(!too_low)
 		vert_state=1;
 		vert_msg="go down! y=";
-		ostringstream convert;   // stream used for the conversion
-		convert <<vert_msg << current_y;      // insert the textual representation of 'Number' in the characters in the stream
-		vert_msg = convert.str();
+		stringstream stream;
+		stream << vert_msg << fixed << setprecision(2) << current_y;
+		vert_msg = stream.str();
 		vel_lin_z=PD_vert.getCurrentControl(current_y);
 	}
 	else
 	{
 		vert_state=0;
 		vert_msg="Vertical - OK y=";
-		ostringstream convert;   // stream used for the conversion
-		convert <<vert_msg << current_y;      // insert the textual representation of 'Number' in the characters in the stream
-		vert_msg = convert.str();
+		stringstream stream;
+		stream << vert_msg << fixed << setprecision(2) << current_y;
+		vert_msg = stream.str();
 		vel_lin_z=0;//PD_vert.getCurrentControl(biggest[1]);
 	}
 
@@ -356,9 +356,9 @@ void findControl(cv_bridge::CvImagePtr &cv_ptr)
 	{
 		dist_state=1;
 		dist_msg="too close! z=";
-		ostringstream convert;   // stream used for the conversion
-		convert <<dist_msg << current_z;      // insert the textual representation of 'Number' in the characters in the stream
-		dist_msg = convert.str();
+		stringstream stream;
+		stream << dist_msg << fixed << setprecision(2) << current_z;
+		dist_msg = stream.str();
 		vel_lin_x=PD_dist.getCurrentControl(current_z);
 
 	}
@@ -366,18 +366,18 @@ void findControl(cv_bridge::CvImagePtr &cv_ptr)
 	{
 		dist_state=1;
 		dist_msg="too far! z=";
-		ostringstream convert;   // stream used for the conversion
-		convert <<dist_msg << current_z;      // insert the textual representation of 'Number' in the characters in the stream
-		dist_msg = convert.str();
+		stringstream stream;
+		stream << dist_msg << fixed << setprecision(2) << current_z;
+		dist_msg = stream.str();
 		vel_lin_x=PD_dist.getCurrentControl(current_z);
 	}
 	else
 	{
 		dist_state=0;
-		dist_msg="Distance - OK z=";
-		ostringstream convert;   // stream used for the conversion
-		convert <<dist_msg << current_z;      // insert the textual representation of 'Number' in the characters in the stream
-		dist_msg = convert.str();
+		dist_msg="Dist - OK! z=";
+		stringstream stream;
+		stream << dist_msg << fixed << setprecision(2) << current_z;
+		dist_msg = stream.str();
 		vel_lin_x=0;//PD_dist.getCurrentControl(biggest[2]);
 	}
 
